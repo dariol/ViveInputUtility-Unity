@@ -82,13 +82,13 @@ namespace HTC.UnityPlugin.Vive
             return VRModule.TryGetConnectedDeviceIndex(serialNumber, out deviceIndex);
         }
 
-        [Obsolete("Use VRModule.GetCurrentDeviceState(deviceIndex).deviceModelNumber instead")]
+        [Obsolete("Use VRModule.GetCurrentDeviceState(deviceIndex).modelNumber instead")]
         public static string GetModelNumber(uint deviceIndex)
         {
             return IsValidIndex(deviceIndex) ? VRModule.GetCurrentDeviceState(deviceIndex).modelNumber : string.Empty;
         }
 
-        [Obsolete("Use VRModule.GetCurrentDeviceState(deviceIndex).deviceSerialNumber instead")]
+        [Obsolete("Use VRModule.GetCurrentDeviceState(deviceIndex).serialNumber instead")]
         public static string GetSerialNumber(uint deviceIndex)
         {
             return IsValidIndex(deviceIndex) ? VRModule.GetCurrentDeviceState(deviceIndex).serialNumber : string.Empty;

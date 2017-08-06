@@ -274,7 +274,9 @@ public class RenderModelHook : MonoBehaviour, IViveRoleComponent
     {
         if (m_modelObj != null)
         {
+#if VIU_STEAMVR
             m_renderModel = null;
+#endif
             Destroy(m_modelObj);
             m_modelObj = null;
         }
