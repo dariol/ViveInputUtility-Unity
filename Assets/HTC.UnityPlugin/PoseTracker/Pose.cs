@@ -1,5 +1,6 @@
-﻿//========= Copyright 2016-2017, HTC Corporation. All rights reserved. ===========
+﻿//========= Copyright 2016-2019, HTC Corporation. All rights reserved. ===========
 
+using HTC.UnityPlugin.Utility;
 using System;
 using UnityEngine;
 
@@ -8,6 +9,7 @@ namespace HTC.UnityPlugin.PoseTracker
     /// <summary>
     /// Describe a pose by position and rotation
     /// </summary>
+    [Obsolete("Use HTC.UnityPlugin.Utility.RigidPose instead")]
     [Serializable]
     public struct Pose
     {
@@ -171,7 +173,8 @@ namespace HTC.UnityPlugin.PoseTracker
         {
             float angle;
             Vector3 axis;
-            (to * Quaternion.Inverse(from)).ToAngleAxis(out angle, out axis);
+            var fromToRot = to * Quaternion.Inverse(from);
+            fromToRot.ToAngleAxis(out angle, out axis);
             while (angle > 180f) { angle -= 360f; }
 
             if (Mathf.Approximately(angle, 0f) || float.IsNaN(axis.x) || float.IsNaN(axis.y) || float.IsNaN(axis.z))
@@ -190,6 +193,16 @@ namespace HTC.UnityPlugin.PoseTracker
         {
             var invRot = Quaternion.Inverse(from.rot);
             return new Pose(invRot * (to.pos - from.pos), invRot * to.rot);
+        }
+
+        public static implicit operator RigidPose(Pose v)
+        {
+            return new RigidPose(v.pos, v.rot);
+        }
+
+        public static implicit operator Pose(RigidPose v)
+        {
+            return new Pose(v.pos, v.rot);
         }
 
         public override string ToString()

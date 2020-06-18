@@ -1,197 +1,239 @@
-﻿//========= Copyright 2016-2017, HTC Corporation. All rights reserved. ===========
+﻿//========= Copyright 2016-2019, HTC Corporation. All rights reserved. ===========
 
 using HTC.UnityPlugin.ColliderEvent;
 using HTC.UnityPlugin.Utility;
 using System;
 using UnityEngine;
 using UnityEngine.Events;
-using Pose = HTC.UnityPlugin.PoseTracker.Pose;
+using UnityEngine.Serialization;
+using GrabberPool = HTC.UnityPlugin.Utility.ObjectPool<HTC.UnityPlugin.Vive.StickyGrabbable.Grabber>;
 
-public class StickyGrabbable : MonoBehaviour, IColliderEventPressDownHandler
+namespace HTC.UnityPlugin.Vive
 {
-    [Serializable]
-    public class UnityEventGrabbable : UnityEvent<StickyGrabbable> { }
-
-    public const float MIN_FOLLOWING_DURATION = 0.02f;
-    public const float DEFAULT_FOLLOWING_DURATION = 0.04f;
-    public const float MAX_FOLLOWING_DURATION = 0.5f;
-
-    private OrderedIndexedTable<ColliderButtonEventData, Pose> eventList = new OrderedIndexedTable<ColliderButtonEventData, Pose>();
-    private ColliderButtonEventData m_bannedEventData;
-
-    public bool alignPosition;
-    public bool alignRotation;
-    public Vector3 alignPositionOffset;
-    public Vector3 alignRotationOffset;
-    [Range(MIN_FOLLOWING_DURATION, MAX_FOLLOWING_DURATION)]
-    public float followingDuration = DEFAULT_FOLLOWING_DURATION;
-    public bool overrideMaxAngularVelocity = true;
-    public bool unblockableGrab = true;
-
-    [SerializeField]
-    private ColliderButtonEventData.InputButton m_grabButton = ColliderButtonEventData.InputButton.Trigger;
-    [SerializeField]
-    private bool m_toggleToRelease = true;
-    [SerializeField]
-    private bool m_multipleGrabbers = false;
-
-    public UnityEventGrabbable afterGrabbed = new UnityEventGrabbable();
-    public UnityEventGrabbable beforeRelease = new UnityEventGrabbable();
-    public UnityEventGrabbable onDrop = new UnityEventGrabbable(); // change rigidbody drop velocity here
-
-    private Pose m_prevPose = Pose.identity; // last frame world pose
-
-    public ColliderButtonEventData.InputButton grabButton { get { return m_grabButton; } set { m_grabButton = value; } }
-
-    public bool isGrabbed { get { return eventList.Count > 0; } }
-
-    public ColliderButtonEventData grabbedEvent { get { return isGrabbed ? eventList.GetLastKey() : null; } }
-
-    // effected rigidbody
-    public Rigidbody rigid { get; set; }
-
-    private bool moveByVelocity { get { return !unblockableGrab && rigid != null && !rigid.isKinematic; } }
-
-    private Pose GetEventPose(ColliderButtonEventData eventData)
+    [AddComponentMenu("VIU/Object Grabber/Sticky Grabbable", 1)]
+    public class StickyGrabbable : GrabbableBase<StickyGrabbable.Grabber>
+        , IColliderEventPressDownHandler
     {
-        var grabberTransform = eventData.eventCaster.transform;
-        return new Pose(grabberTransform);
-    }
-
-    protected virtual void Awake()
-    {
-        rigid = GetComponent<Rigidbody>();
-    }
-
-    protected virtual void OnDisable()
-    {
-        Release();
-    }
-
-    public virtual void OnColliderEventPressDown(ColliderButtonEventData eventData)
-    {
-        if (eventData.button != m_grabButton || eventList.ContainsKey(eventData) || eventData == m_bannedEventData) { return; }
-
-        var casterPose = GetEventPose(eventData);
-        var offsetPose = Pose.FromToPose(casterPose, new Pose(transform));
-
-        if (alignPosition) { offsetPose.pos = Vector3.zero; }
-        if (alignRotation) { offsetPose.rot = Quaternion.identity; }
-
-        if (!m_multipleGrabbers && eventList.Count > 0)
+        public class Grabber : IGrabber
         {
-            Release();
-        }
+            private static GrabberPool m_pool;
 
-        eventList.AddUniqueKey(eventData, offsetPose);
+            public ColliderButtonEventData eventData { get; private set; }
 
-        if (afterGrabbed != null)
-        {
-            afterGrabbed.Invoke(this);
-        }
-    }
-
-    protected virtual void FixedUpdate()
-    {
-        if (isGrabbed && moveByVelocity)
-        {
-            // if rigidbody exists, follow eventData caster using physics
-            var casterPose = GetEventPose(grabbedEvent);
-            var offsetPose = eventList.GetLastValue();
-
-            if (alignPosition) { offsetPose.pos = alignPositionOffset; }
-            if (alignRotation) { offsetPose.rot = Quaternion.Euler(alignRotationOffset); }
-
-            var targetPose = casterPose * offsetPose;
-            Pose.SetRigidbodyVelocity(rigid, rigid.position, targetPose.pos, followingDuration);
-            Pose.SetRigidbodyAngularVelocity(rigid, rigid.rotation, targetPose.rot, followingDuration, overrideMaxAngularVelocity);
-        }
-    }
-
-    protected virtual void Update()
-    {
-        if (isGrabbed && !moveByVelocity)
-        {
-            // if rigidbody doesn't exist, just move to eventData caster's pose
-            var casterPose = GetEventPose(grabbedEvent);
-            var offsetPose = eventList.GetLastValue();
-
-            if (alignPosition) { offsetPose.pos = alignPositionOffset; }
-            if (alignRotation) { offsetPose.rot = Quaternion.Euler(alignRotationOffset); }
-
-            m_prevPose = new Pose(transform);
-
-            if (rigid != null)
+            public RigidPose grabberOrigin
             {
-                rigid.velocity = Vector3.zero;
-                rigid.angularVelocity = Vector3.zero;
-            }
-
-            var targetPose = casterPose * offsetPose;
-            transform.position = targetPose.pos;
-            transform.rotation = targetPose.rot;
-        }
-
-        // reset banned event data
-        m_bannedEventData = null;
-
-        // toggle grab button to release
-        if (m_toggleToRelease && isGrabbed)
-        {
-            var released = grabbedEvent.GetPressDown();
-            if (released)
-            {
-                m_bannedEventData = grabbedEvent; // ban this press down event so that it won't trigger another grab in OnColliderEventPressDown
-
-                if (beforeRelease != null)
+                get
                 {
-                    beforeRelease.Invoke(this);
+                    return new RigidPose(eventData.eventCaster.transform);
                 }
             }
 
-            eventList.RemoveAll((obj) => obj.Key.GetPressDown());
+            public RigidPose grabOffset { get; set; }
 
-            if (isGrabbed)
+            // NOTE:
+            // We can't make sure the excution order of OnColliderEventPressDown() and Update()
+            // Hence log grabFrame to avoid redundant release in Update()
+            // and redeayForRelease flag(remove grabber from m_eventGrabberSet one frame later) to avoid redundant grabbing in OnColliderEventPressDown()
+            public int grabFrame { get; set; }
+            public bool redeayForRelease { get; set; }
+
+            public static Grabber Get(ColliderButtonEventData eventData)
             {
-                if (released && afterGrabbed != null)
+                if (m_pool == null)
                 {
-                    afterGrabbed.Invoke(this);
+                    m_pool = new GrabberPool(() => new Grabber());
                 }
+
+                var grabber = m_pool.Get();
+                grabber.eventData = eventData;
+                grabber.redeayForRelease = false;
+                return grabber;
             }
-            else
+
+            public static void Release(Grabber grabber)
             {
-                DoDrop();
+                grabber.eventData = null;
+                m_pool.Release(grabber);
             }
         }
-    }
 
-    public void Release()
-    {
-        if (!isGrabbed) { return; }
+        [Serializable]
+        public class UnityEventGrabbable : UnityEvent<StickyGrabbable> { }
 
-        if (beforeRelease != null)
+        private IndexedTable<ColliderButtonEventData, Grabber> m_eventGrabberSet;
+
+        public bool alignPosition;
+        public bool alignRotation;
+        public Vector3 alignPositionOffset;
+        public Vector3 alignRotationOffset;
+        [Range(MIN_FOLLOWING_DURATION, MAX_FOLLOWING_DURATION)]
+        [FormerlySerializedAs("followingDuration")]
+        [SerializeField]
+        private float m_followingDuration = DEFAULT_FOLLOWING_DURATION;
+        [FormerlySerializedAs("overrideMaxAngularVelocity")]
+        [SerializeField]
+        private bool m_overrideMaxAngularVelocity = true;
+        [FormerlySerializedAs("unblockableGrab")]
+        [SerializeField]
+        private bool m_unblockableGrab = true;
+        [SerializeField]
+        private ColliderButtonEventData.InputButton m_grabButton = ColliderButtonEventData.InputButton.Trigger;
+        [SerializeField]
+        private bool m_toggleToRelease = true;
+        [FormerlySerializedAs("m_multipleGrabbers")]
+        [SerializeField]
+        private bool m_allowMultipleGrabbers = false;
+        [FormerlySerializedAs("afterGrabbed")]
+        [SerializeField]
+        private UnityEventGrabbable m_afterGrabbed = new UnityEventGrabbable();
+        [FormerlySerializedAs("beforeRelease")]
+        [SerializeField]
+        private UnityEventGrabbable m_beforeRelease = new UnityEventGrabbable();
+        [FormerlySerializedAs("onDrop")]
+        [SerializeField]
+        private UnityEventGrabbable m_onDrop = new UnityEventGrabbable(); // change rigidbody drop velocity here
+
+        public override float followingDuration { get { return m_followingDuration; } set { m_followingDuration = Mathf.Clamp(value, MIN_FOLLOWING_DURATION, MAX_FOLLOWING_DURATION); } }
+
+        public override bool overrideMaxAngularVelocity { get { return m_overrideMaxAngularVelocity; } set { overrideMaxAngularVelocity = value; } }
+
+        public bool unblockableGrab { get { return m_unblockableGrab; } set { m_unblockableGrab = value; } }
+
+        public bool toggleToRelease { get { return m_toggleToRelease; } set { m_toggleToRelease = value; } }
+
+        public UnityEventGrabbable afterGrabbed { get { return m_afterGrabbed; } }
+
+        public UnityEventGrabbable beforeRelease { get { return m_beforeRelease; } }
+
+        public UnityEventGrabbable onDrop { get { return m_onDrop; } }
+
+        public ColliderButtonEventData grabbedEvent { get { return isGrabbed ? currentGrabber.eventData : null; } }
+
+        public ColliderButtonEventData.InputButton grabButton
         {
-            beforeRelease.Invoke(this);
+            get
+            {
+                return m_grabButton;
+            }
+            set
+            {
+                m_grabButton = value;
+                MaterialChanger.SetAllChildrenHeighlightButton(gameObject, value);
+            }
         }
 
-        eventList.Clear();
+        private bool moveByVelocity { get { return !unblockableGrab && grabRigidbody != null && !grabRigidbody.isKinematic; } }
 
-        DoDrop();
-    }
+        [Obsolete("Use grabRigidbody instead")]
+        public Rigidbody rigid { get { return grabRigidbody; } set { grabRigidbody = value; } }
 
-    private void DoDrop()
-    {
-        if (!moveByVelocity && rigid != null && !rigid.isKinematic && m_prevPose != Pose.identity)
+#if UNITY_EDITOR
+        protected virtual void OnValidate()
         {
-            Pose.SetRigidbodyVelocity(rigid, m_prevPose.pos, transform.position, Time.deltaTime);
-            Pose.SetRigidbodyAngularVelocity(rigid, m_prevPose.rot, transform.rotation, Time.deltaTime, overrideMaxAngularVelocity);
+            MaterialChanger.SetAllChildrenHeighlightButton(gameObject, m_grabButton);
+        }
+#endif
 
-            m_prevPose = Pose.identity;
+        protected override void Awake()
+        {
+            base.Awake();
+            MaterialChanger.SetAllChildrenHeighlightButton(gameObject, m_grabButton);
+
+            afterGrabberGrabbed += () => m_afterGrabbed.Invoke(this);
+            beforeGrabberReleased += () => m_beforeRelease.Invoke(this);
+            onGrabberDrop += () => m_onDrop.Invoke(this);
         }
 
-        if (onDrop != null)
+        protected virtual void OnDisable()
         {
-            onDrop.Invoke(this);
+            ClearGrabbers(true);
+            ClearEventGrabberSet();
+        }
+
+        private void ClearEventGrabberSet()
+        {
+            if (m_eventGrabberSet == null) { return; }
+
+            for (int i = m_eventGrabberSet.Count - 1; i >= 0; --i)
+            {
+                Grabber.Release(m_eventGrabberSet.GetValueByIndex(i));
+            }
+
+            m_eventGrabberSet.Clear();
+        }
+
+        public virtual void OnColliderEventPressDown(ColliderButtonEventData eventData)
+        {
+            if (eventData.button != m_grabButton) { return; }
+
+            Grabber grabber;
+            if (m_eventGrabberSet == null || !m_eventGrabberSet.TryGetValue(eventData, out grabber))
+            {
+                if (!m_allowMultipleGrabbers)
+                {
+                    ClearGrabbers(false);
+                    ClearEventGrabberSet();
+                }
+
+                grabber = Grabber.Get(eventData);
+                var offset = RigidPose.FromToPose(grabber.grabberOrigin, new RigidPose(transform));
+                if (alignPosition) { offset.pos = alignPositionOffset; }
+                if (alignRotation) { offset.rot = Quaternion.Euler(alignRotationOffset); }
+                grabber.grabOffset = offset;
+                grabber.grabFrame = Time.frameCount;
+
+                if (m_eventGrabberSet == null) { m_eventGrabberSet = new IndexedTable<ColliderButtonEventData, Grabber>(); }
+                m_eventGrabberSet.Add(eventData, grabber);
+
+                AddGrabber(grabber);
+            }
+            else if (toggleToRelease)
+            {
+                RemoveGrabber(grabber);
+                m_eventGrabberSet.Remove(eventData);
+                Grabber.Release(grabber);
+            }
+        }
+
+        protected virtual void FixedUpdate()
+        {
+            if (isGrabbed && moveByVelocity)
+            {
+                OnGrabRigidbody();
+            }
+        }
+
+        protected virtual void Update()
+        {
+            if (!isGrabbed) { return; }
+
+            if (!moveByVelocity)
+            {
+                RecordLatestPosesForDrop(Time.time, 0.05f);
+                OnGrabTransform();
+            }
+
+            // check toggle release
+            if (toggleToRelease)
+            {
+                m_eventGrabberSet.RemoveAll((pair) =>
+                {
+                    var grabber = pair.Value;
+                    if (!grabber.eventData.GetPressDown()) { return false; }
+
+                    if (grabber.grabFrame == Time.frameCount) { return false; }
+
+                    if (!grabber.redeayForRelease)
+                    {
+                        RemoveGrabber(grabber);
+                        grabber.redeayForRelease = true;
+                        return false;
+                    }
+
+                    Grabber.Release(grabber);
+                    return true;
+                });
+            }
         }
     }
 }

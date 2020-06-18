@@ -1,10 +1,9 @@
-﻿//========= Copyright 2016-2017, HTC Corporation. All rights reserved. ===========
+﻿//========= Copyright 2016-2019, HTC Corporation. All rights reserved. ===========
 
 using HTC.UnityPlugin.Utility;
 using HTC.UnityPlugin.VRModuleManagement;
 using System;
 using UnityEngine;
-using Pose = HTC.UnityPlugin.PoseTracker.Pose;
 
 namespace HTC.UnityPlugin.Vive
 {
@@ -82,7 +81,7 @@ namespace HTC.UnityPlugin.Vive
         /// <summary>
         /// Returns tracking pose of the device identified by role
         /// </summary>
-        public static Pose GetPose(HandRole role, Transform origin = null)
+        public static RigidPose GetPose(HandRole role, Transform origin = null)
         {
             return GetPose(ViveRole.GetDeviceIndexEx(role), origin);
         }
@@ -90,7 +89,7 @@ namespace HTC.UnityPlugin.Vive
         /// <summary>
         /// Returns tracking pose of the device identified by role
         /// </summary>
-        public static Pose GetPose(DeviceRole role, Transform origin = null)
+        public static RigidPose GetPose(DeviceRole role, Transform origin = null)
         {
             return GetPose(ViveRole.GetDeviceIndexEx(role), origin);
         }
@@ -146,7 +145,7 @@ namespace HTC.UnityPlugin.Vive
         /// <summary>
         /// Returns tracking pose of the device identified by role
         /// </summary>
-        public static Pose GetPose(ViveRoleProperty role, Transform origin = null)
+        public static RigidPose GetPose(ViveRoleProperty role, Transform origin = null)
         {
             return GetPose(role.GetDeviceIndex(), origin);
         }
@@ -273,7 +272,7 @@ namespace HTC.UnityPlugin.Vive
         /// TRole can be DeviceRole, TrackerRole or any other enum type that have ViveRoleEnumAttribute.
         /// Use ViveRole.ValidateViveRoleEnum() to validate role type
         /// </param>
-        public static Pose GetPoseEx<TRole>(TRole role, Transform origin = null)
+        public static RigidPose GetPoseEx<TRole>(TRole role, Transform origin = null)
         {
             return GetPose(ViveRole.GetDeviceIndexEx(role), origin);
         }
@@ -369,7 +368,7 @@ namespace HTC.UnityPlugin.Vive
         /// Can be DeviceRole, TrackerRole or any other enum type that have ViveRoleEnumAttribute.
         /// Use ViveRole.ValidateViveRoleEnum() to validate role type
         /// </param>
-        public static Pose GetPoseEx(Type roleType, int roleValue, Transform origin = null)
+        public static RigidPose GetPoseEx(Type roleType, int roleValue, Transform origin = null)
         {
             return GetPose(ViveRole.GetDeviceIndexEx(roleType, roleValue), origin);
         }
@@ -446,20 +445,18 @@ namespace HTC.UnityPlugin.Vive
                 return origin.TransformVector(VRModule.GetCurrentDeviceState(deviceIndex).angularVelocity);
             }
         }
-
-        public static Pose GetPose(uint deviceIndex, Transform origin = null)
+        
+        public static RigidPose GetPose(uint deviceIndex, Transform origin = null)
         {
-            if (!VRModule.IsValidDeviceIndex(deviceIndex))
+            var devicePose = VRModule.GetCurrentDeviceState(deviceIndex).pose;
+
+            if (origin == null)
             {
-                return default(Pose);
-            }
-            else if (origin == null)
-            {
-                return VRModule.GetCurrentDeviceState(deviceIndex).pose;
+                return devicePose;
             }
             else
             {
-                var rawPose = new Pose(origin) * VRModule.GetCurrentDeviceState(deviceIndex).pose;
+                var rawPose = new RigidPose(origin) * devicePose;
                 rawPose.pos.Scale(origin.localScale);
                 return rawPose;
             }
@@ -467,7 +464,7 @@ namespace HTC.UnityPlugin.Vive
 
         public static void SetPose(Transform target, uint deviceIndex, Transform origin = null)
         {
-            Pose.SetPose(target, GetPose(deviceIndex), origin);
+            RigidPose.SetPose(target, GetPose(deviceIndex), origin);
         }
         #endregion base
     }

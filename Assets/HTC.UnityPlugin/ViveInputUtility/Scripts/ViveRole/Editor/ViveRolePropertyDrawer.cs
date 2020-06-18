@@ -1,8 +1,7 @@
-﻿//========= Copyright 2016-2017, HTC Corporation. All rights reserved. ===========
+﻿//========= Copyright 2016-2019, HTC Corporation. All rights reserved. ===========
 
 using HTC.UnityPlugin.Utility;
 using System;
-using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using UnityEditor;
@@ -165,6 +164,8 @@ namespace HTC.UnityPlugin.Vive
 
                     target.SetValueDirty();
                 }
+
+                EditorApplication.delayCall += target.Update;
             }
 
             property.serializedObject.ApplyModifiedProperties(); // will call ViveRoleProperty.OnAfterDeserialize here

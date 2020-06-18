@@ -1,4 +1,4 @@
-﻿//========= Copyright 2016-2017, HTC Corporation. All rights reserved. ===========
+﻿//========= Copyright 2016-2019, HTC Corporation. All rights reserved. ===========
 
 using HTC.UnityPlugin.Utility;
 using HTC.UnityPlugin.VRModuleManagement;
@@ -559,9 +559,9 @@ namespace HTC.UnityPlugin.Vive
 
             public void UnbindAll()
             {
-                for (var roleValue = m_info.MinValidRoleValue; roleValue <= m_info.MaxValidRoleValue; ++roleValue)
+                for (int i = m_sn2role.Count - 1; i >= 0; --i)
                 {
-                    UnbindRoleValue(roleValue);
+                    UnbindDevice(m_sn2role.GetKeyByIndex(i));
                 }
             }
 

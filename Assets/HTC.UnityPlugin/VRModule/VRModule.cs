@@ -1,9 +1,6 @@
-﻿//========= Copyright 2016-2017, HTC Corporation. All rights reserved. ===========
+﻿//========= Copyright 2016-2019, HTC Corporation. All rights reserved. ===========
 
-using HTC.UnityPlugin.PoseTracker;
 using HTC.UnityPlugin.Utility;
-using System.Collections.Generic;
-using UnityEngine;
 
 namespace HTC.UnityPlugin.VRModuleManagement
 {
@@ -17,25 +14,29 @@ namespace HTC.UnityPlugin.VRModuleManagement
     {
         Auto = -1,
         None = 0,
-        //Simulator = 1,
+        Simulator = 1,
         UnityNativeVR = 2,
         SteamVR = 3,
         OculusVR = 4,
+        DayDream = 5,
+        WaveVR = 6,
     }
 
     public enum VRModuleActiveEnum
     {
         Uninitialized = -1,
         None = VRModuleSelectEnum.None,
-        //Simulator = SelectVRModuleEnum.Simulator,
+        Simulator = VRModuleSelectEnum.Simulator,
         UnityNativeVR = VRModuleSelectEnum.UnityNativeVR,
         SteamVR = VRModuleSelectEnum.SteamVR,
         OculusVR = VRModuleSelectEnum.OculusVR,
+        DayDream = VRModuleSelectEnum.DayDream,
+        WaveVR = VRModuleSelectEnum.WaveVR,
     }
 
     public partial class VRModule : SingletonBehaviour<VRModule>
     {
-        public const uint MAX_DEVICE_COUNT = 16u;
+        public const uint MAX_DEVICE_COUNT = 64u;
         public const uint INVALID_DEVICE_INDEX = 4294967295u;
         public const uint HMD_DEVICE_INDEX = 0u;
 
@@ -87,7 +88,8 @@ namespace HTC.UnityPlugin.VRModuleManagement
 
         public static bool IsValidDeviceIndex(uint deviceIndex)
         {
-            return deviceIndex < MAX_DEVICE_COUNT;
+            if (!Active) { return false; }
+            return deviceIndex < Instance.GetDeviceStateLength();
         }
 
         public static bool HasInputFocus()
@@ -97,29 +99,52 @@ namespace HTC.UnityPlugin.VRModuleManagement
 
         public static bool IsDeviceConnected(string deviceSerialNumber)
         {
-            return s_deviceSerialNumberTable.ContainsKey(deviceSerialNumber);
+            return (string.IsNullOrEmpty(deviceSerialNumber) || s_deviceSerialNumberTable == null) ? false : s_deviceSerialNumberTable.ContainsKey(deviceSerialNumber);
         }
 
         public static uint GetConnectedDeviceIndex(string deviceSerialNumber)
         {
             uint deviceIndex;
-            if (s_deviceSerialNumberTable.TryGetValue(deviceSerialNumber, out deviceIndex)) { return deviceIndex; }
-            return INVALID_DEVICE_INDEX;
+            if (string.IsNullOrEmpty(deviceSerialNumber) || s_deviceSerialNumberTable == null || !s_deviceSerialNumberTable.TryGetValue(deviceSerialNumber, out deviceIndex))
+            {
+                return INVALID_DEVICE_INDEX;
+            }
+            else
+            {
+                return deviceIndex;
+            }
         }
 
         public static bool TryGetConnectedDeviceIndex(string deviceSerialNumber, out uint deviceIndex)
         {
-            return s_deviceSerialNumberTable.TryGetValue(deviceSerialNumber, out deviceIndex);
+            if (string.IsNullOrEmpty(deviceSerialNumber) || s_deviceSerialNumberTable == null)
+            {
+                deviceIndex = INVALID_DEVICE_INDEX;
+                return false;
+            }
+            else
+            {
+                return s_deviceSerialNumberTable.TryGetValue(deviceSerialNumber, out deviceIndex);
+            }
         }
+
+        public static uint GetDeviceStateCount() { return Instance == null ? 0u : Instance.GetDeviceStateLength(); }
 
         public static IVRModuleDeviceState GetCurrentDeviceState(uint deviceIndex)
         {
-            return Instance == null || !IsValidDeviceIndex(deviceIndex) ? s_defaultState : Instance.m_currStates[deviceIndex];
+            if (!IsValidDeviceIndex(deviceIndex) || Instance == null || Instance.m_currStates == null) { return s_defaultState; }
+            return Instance.m_currStates[deviceIndex] ?? s_defaultState;
         }
 
         public static IVRModuleDeviceState GetPreviousDeviceState(uint deviceIndex)
         {
-            return Instance == null || !IsValidDeviceIndex(deviceIndex) ? s_defaultState : Instance.m_prevStates[deviceIndex];
+            if (!IsValidDeviceIndex(deviceIndex) || Instance == null || Instance.m_prevStates == null) { return s_defaultState; }
+            return Instance.m_prevStates[deviceIndex] ?? s_defaultState;
+        }
+
+        public static IVRModuleDeviceState GetDeviceState(uint deviceIndex, bool usePrevious = false)
+        {
+            return usePrevious ? GetPreviousDeviceState(deviceIndex) : GetCurrentDeviceState(deviceIndex);
         }
 
         public static uint GetLeftControllerDeviceIndex()
@@ -152,11 +177,21 @@ namespace HTC.UnityPlugin.VRModuleManagement
             }
         }
 
+        public static ISimulatorVRModule Simulator { get { return s_simulator; } }
+
         public static void TriggerViveControllerHaptic(uint deviceIndex, ushort durationMicroSec = 500)
         {
             if (Instance != null && Instance.m_activatedModuleBase != null && IsValidDeviceIndex(deviceIndex))
             {
                 Instance.m_activatedModuleBase.TriggerViveControllerHaptic(deviceIndex, durationMicroSec);
+            }
+        }
+
+        public static void TriggerHapticVibration(uint deviceIndex, float durationSeconds = 0.01f, float frequency = 85f, float amplitude = 0.125f, float startSecondsFromNow = 0f)
+        {
+            if (Instance != null && Instance.m_activatedModuleBase != null && IsValidDeviceIndex(deviceIndex))
+            {
+                Instance.m_activatedModuleBase.TriggerHapticVibration(deviceIndex, durationSeconds, frequency, amplitude, startSecondsFromNow);
             }
         }
     }

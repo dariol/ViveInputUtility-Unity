@@ -1,10 +1,19 @@
-﻿//========= Copyright 2016-2017, HTC Corporation. All rights reserved. ===========
-
+﻿//========= Copyright 2016-2019, HTC Corporation. All rights reserved. ===========
+#pragma warning disable 0649
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEngine;
+using System.Reflection;
+
+#if UNITY_5_4_OR_NEWER
+using UnityEngine.Networking;
+#else
+using UnityWebRequest = UnityEngine.WWW;
+#endif
 
 namespace HTC.UnityPlugin.Vive
 {
@@ -18,88 +27,291 @@ namespace HTC.UnityPlugin.Vive
             public string body;
         }
 
-        public const string VIU_BINDING_INTERFACE_SWITCH_SYMBOL = "VIU_BINDING_INTERFACE_SWITCH";
-        public const string VIU_EXTERNAL_CAMERA_SWITCH_SYMBOL = "VIU_EXTERNAL_CAMERA_SWITCH";
+        public interface IPropSetting
+        {
+            bool SkipCheck();
+            void UpdateCurrentValue();
+            bool IsIgnored();
+            bool IsUsingRecommendedValue();
+            void DoDrawRecommend();
+            void AcceptRecommendValue();
+            void DoIgnore();
+            void DeleteIgnore();
+        }
+
+        public class RecommendedSetting<T> : IPropSetting
+        {
+            private const string fmtTitle = "{0} (current = {1})";
+            private const string fmtRecommendBtn = "Use recommended ({0})";
+            private const string fmtRecommendBtnWithPosefix = "Use recommended ({0}) - {1}";
+
+            private string m_settingTitle;
+            private string m_settingTrimedTitle;
+            private string ignoreKey { get { return m_settingTrimedTitle; } }
+
+            public string settingTitle { get { return m_settingTitle; } set { m_settingTitle = value; m_settingTrimedTitle = value.Replace(" ", ""); } }
+            public string recommendBtnPostfix = string.Empty;
+            public string toolTip = string.Empty;
+            public Func<bool> skipCheckFunc = null;
+            public Func<T> recommendedValueFunc = null;
+            public Func<T> currentValueFunc = null;
+            public Action<T> setValueFunc = null;
+            public T currentValue = default(T);
+            public T recommendedValue = default(T);
+
+            public T GetRecommended() { return recommendedValueFunc == null ? recommendedValue : recommendedValueFunc(); }
+
+            public bool SkipCheck() { return skipCheckFunc == null ? false : skipCheckFunc(); }
+
+            public bool IsIgnored() { return VIUProjectSettings.HasIgnoreKey(ignoreKey); }
+
+            public bool IsUsingRecommendedValue() { return EqualityComparer<T>.Default.Equals(currentValue, GetRecommended()); }
+
+            public void UpdateCurrentValue() { currentValue = currentValueFunc(); }
+
+            public void DoDrawRecommend()
+            {
+                GUILayout.Label(new GUIContent(string.Format(fmtTitle, settingTitle, currentValue), toolTip));
+
+                GUILayout.BeginHorizontal();
+
+                bool recommendBtnClicked;
+                if (string.IsNullOrEmpty(recommendBtnPostfix))
+                {
+                    recommendBtnClicked = GUILayout.Button(new GUIContent(string.Format(fmtRecommendBtn, GetRecommended()), toolTip));
+                }
+                else
+                {
+                    recommendBtnClicked = GUILayout.Button(new GUIContent(string.Format(fmtRecommendBtnWithPosefix, GetRecommended(), recommendBtnPostfix), toolTip));
+                }
+
+                if (recommendBtnClicked)
+                {
+                    AcceptRecommendValue();
+                }
+
+                GUILayout.FlexibleSpace();
+
+                if (GUILayout.Button(new GUIContent("Ignore", toolTip)))
+                {
+                    DoIgnore();
+                }
+
+                GUILayout.EndHorizontal();
+            }
+
+            public void AcceptRecommendValue()
+            {
+                setValueFunc(GetRecommended());
+            }
+
+            public void DoIgnore()
+            {
+                VIUProjectSettings.AddIgnoreKey(ignoreKey);
+            }
+
+            public void DeleteIgnore()
+            {
+                VIUProjectSettings.RemoveIgnoreKey(ignoreKey);
+            }
+        }
+
+        public abstract class RecommendedSettingCollection : List<IPropSetting> { }
 
         public const string lastestVersionUrl = "https://api.github.com/repos/ViveSoftware/ViveInputUtility-Unity/releases/latest";
         public const string pluginUrl = "https://github.com/ViveSoftware/ViveInputUtility-Unity/releases";
-        public const double versionCheckIntervalMinutes = 60.0;
+        public const double versionCheckIntervalMinutes = 30.0;
 
-        private static string nextVersionCheckTimeKey;
-        private static string doNotShowUpdateKey;
-        private static string doNotShowSetupSwitch;
-
-        private readonly static string s_enableBindUISwitchInfo = "This project will enable binding interface switch! Press RightShift + B to open the binding interface in play mode.";
-        private readonly static string s_disableBindUISwitchInfo = "This project will NOT enable binding interface switch! You can only enable it manually by calling ViveRoleBindingsHelper.EnableBindingInterface() in script, or copy \"ViveInputUtility/Scripts/ViveRole/BindingInterface/BindingConfigSample/vive_role_bindings.cfg\" file into project folder before you can press RightShift + B to open the binding interface in play mode.";
-        private readonly static string s_enableExternalCamSwitcInfo = "This project will enable external camera switch! Press RightShift + M to toggle the quad view when external camera is enabled.";
-        private readonly static string s_disableExternalCamSwitcInfo = "This project will NOT enable external camera switch! Enable the switch let you toggle the quad view by pressing RightShift + M when external camera is enabled.";
-        private static bool s_waitingForCompile;
+        private const string nextVersionCheckTimeKey = "ViveInputUtility.LastVersionCheckTime";
+        private const string fmtIgnoreUpdateKey = "DoNotShowUpdate.v{0}";
+        private static string ignoreThisVersionKey;
 
         private static bool completeCheckVersionFlow = false;
-        private static WWW www;
+        private static UnityWebRequest webReq;
         private static RepoInfo latestRepoInfo;
-        private static Version latestVersion;
-        private static VIUVersionCheck window;
+        private static System.Version latestVersion;
+        private static Vector2 releaseNoteScrollPosition;
+        private static Vector2 settingScrollPosition;
+        private static bool showNewVersion;
+        private static bool toggleSkipThisVersion = false;
+        private static VIUVersionCheck windowInstance;
+        private static List<IPropSetting> s_settings;
+        private Texture2D viuLogo;
 
-        private static bool showNewVersionInfo = false;
-        private static bool showSwitchSetup = false;
+        /// <summary>
+        /// Count of settings that are ignored
+        /// </summary>
+        public static int ignoredSettingsCount { get; private set; }
+        /// <summary>
+        /// Count of settings that are not using recommended value
+        /// </summary>
+        public static int shouldNotifiedSettingsCount { get; private set; }
+        /// <summary>
+        /// Count of settings that are not ignored and not using recommended value
+        /// </summary>
+        public static int notifiedSettingsCount { get; private set; }
+
+        public static bool recommendedWindowOpened { get { return windowInstance != null; } }
 
         static VIUVersionCheck()
         {
-            EditorApplication.update += CheckVersion;
-            s_waitingForCompile = false;
-            EditorApplication.RepaintProjectWindow();
+            EditorApplication.update += CheckVersionAndSettings;
+        }
+
+        public static void AddRecommendedSetting<T>(RecommendedSetting<T> setting)
+        {
+            InitializeSettins();
+            s_settings.Add(setting);
+        }
+
+        private static void InitializeSettins()
+        {
+            if (s_settings != null) { return; }
+
+            s_settings = new List<IPropSetting>();
+
+            foreach (var type in Assembly.GetAssembly(typeof(RecommendedSettingCollection)).GetTypes().Where(t => t.IsClass && !t.IsAbstract && t.IsSubclassOf(typeof(RecommendedSettingCollection))))
+            {
+                s_settings.AddRange((RecommendedSettingCollection)Activator.CreateInstance(type));
+            }
+        }
+
+        private static void VersionCheckLog(string msg)
+        {
+#if VIU_PRINT_FETCH_VERSION_LOG
+            using (var outputFile = new StreamWriter("VIUVersionCheck.log", true))
+            {
+                outputFile.WriteLine(DateTime.Now.ToString() + " - " + msg + ". Stop fetching until " + UtcDateTimeFromStr(EditorPrefs.GetString(nextVersionCheckTimeKey)).ToLocalTime().ToString());
+            }
+#endif
         }
 
         // check vive input utility version on github
-        private static void CheckVersion()
+        private static void CheckVersionAndSettings()
         {
-            nextVersionCheckTimeKey = "ViveInputUtility." + PlayerSettings.productGUID + ".LastVersionCheckTime";
-            doNotShowUpdateKey = "ViveInputUtility." + PlayerSettings.productGUID + ".DoNotShowUpdate.v{0}";
-            doNotShowSetupSwitch = "ViveInputUtility." + PlayerSettings.productGUID + ".DoNotShowSetupSwitch";
-
-            if (!completeCheckVersionFlow)
+            if (Application.isPlaying)
             {
-                if (www == null) // web request not running
+                EditorApplication.update -= CheckVersionAndSettings;
+                return;
+            }
+
+            InitializeSettins();
+
+            // fetch new version info from github release site
+            if (!completeCheckVersionFlow && VIUSettings.autoCheckNewVIUVersion)
+            {
+                if (webReq == null) // web request not running
                 {
                     if (EditorPrefs.HasKey(nextVersionCheckTimeKey) && DateTime.UtcNow < UtcDateTimeFromStr(EditorPrefs.GetString(nextVersionCheckTimeKey)))
                     {
+                        VersionCheckLog("Skipped");
                         completeCheckVersionFlow = true;
                         return;
                     }
 
-                    www = new WWW(lastestVersionUrl);
+                    webReq = GetUnityWebRequestAndSend(lastestVersionUrl);
                 }
 
-                if (!www.isDone)
+                if (!webReq.isDone)
                 {
                     return;
                 }
 
-                if (UrlSuccess(www))
-                {
-                    EditorPrefs.SetString(nextVersionCheckTimeKey, UtcDateTimeToStr(DateTime.UtcNow.AddMinutes(versionCheckIntervalMinutes)));
+                // On Windows, PlaterSetting is stored at \HKEY_CURRENT_USER\Software\Unity Technologies\Unity Editor 5.x
+                EditorPrefs.SetString(nextVersionCheckTimeKey, UtcDateTimeToStr(DateTime.UtcNow.AddMinutes(versionCheckIntervalMinutes)));
 
-                    latestRepoInfo = JsonUtility.FromJson<RepoInfo>(www.text);
+                if (UrlSuccess(webReq))
+                {
+                    latestRepoInfo = JsonUtility.FromJson<RepoInfo>(GetWebText(webReq));
+                    VersionCheckLog("Fetched");
                 }
 
-                showNewVersionInfo = ShouldDisplayNewUpdate();
+                // parse latestVersion and ignoreThisVersionKey
+                if (!string.IsNullOrEmpty(latestRepoInfo.tag_name))
+                {
+                    try
+                    {
+                        latestVersion = new System.Version(Regex.Replace(latestRepoInfo.tag_name, "[^0-9\\.]", string.Empty));
+                        ignoreThisVersionKey = string.Format(fmtIgnoreUpdateKey, latestVersion.ToString());
+                    }
+                    catch
+                    {
+                        latestVersion = default(System.Version);
+                        ignoreThisVersionKey = string.Empty;
+                    }
+                }
 
-                www.Dispose();
-                www = null;
+                webReq.Dispose();
+                webReq = null;
 
                 completeCheckVersionFlow = true;
             }
 
-            showSwitchSetup = showNewVersionInfo || !EditorPrefs.HasKey(doNotShowSetupSwitch);
+            VIUSettingsEditor.PackageManagerHelper.PreparePackageList();
+            if (VIUSettingsEditor.PackageManagerHelper.isPreparingList) { return; }
 
-            if (showNewVersionInfo || showSwitchSetup)
+            showNewVersion = !string.IsNullOrEmpty(ignoreThisVersionKey) && !VIUProjectSettings.HasIgnoreKey(ignoreThisVersionKey) && latestVersion > VIUVersion.current;
+
+            UpdateIgnoredNotifiedSettingsCount(false);
+
+            if (showNewVersion || notifiedSettingsCount > 0)
             {
-                window = GetWindow<VIUVersionCheck>(true, "Vive Input Utility");
-                window.minSize = new Vector2(320, 440);
+                TryOpenRecommendedSettingWindow();
             }
 
-            EditorApplication.update -= CheckVersion;
+            EditorApplication.update -= CheckVersionAndSettings;
+        }
+
+        public static void UpdateIgnoredNotifiedSettingsCount(bool drawNotifiedPrompt)
+        {
+            InitializeSettins();
+
+            ignoredSettingsCount = 0;
+            shouldNotifiedSettingsCount = 0;
+            notifiedSettingsCount = 0;
+
+            foreach (var setting in s_settings)
+            {
+                if (setting.SkipCheck()) { continue; }
+
+                setting.UpdateCurrentValue();
+
+                var isIgnored = setting.IsIgnored();
+                if (isIgnored) { ++ignoredSettingsCount; }
+
+                if (setting.IsUsingRecommendedValue()) { continue; }
+                else { ++shouldNotifiedSettingsCount; }
+
+                if (!isIgnored)
+                {
+                    ++notifiedSettingsCount;
+
+                    if (drawNotifiedPrompt)
+                    {
+                        if (notifiedSettingsCount == 1)
+                        {
+                            EditorGUILayout.HelpBox("Recommended project settings:", MessageType.Warning);
+
+                            settingScrollPosition = GUILayout.BeginScrollView(settingScrollPosition, GUILayout.ExpandHeight(true));
+                        }
+
+                        setting.DoDrawRecommend();
+                    }
+
+                }
+            }
+        }
+
+        // Open recommended setting window (with possible new version prompt)
+        // won't do any thing if the window is already opened
+        public static void TryOpenRecommendedSettingWindow()
+        {
+            if (recommendedWindowOpened) { return; }
+
+            windowInstance = GetWindow<VIUVersionCheck>(true, "Vive Input Utility");
+            windowInstance.minSize = new Vector2(240f, 550f);
+            var rect = windowInstance.position;
+            windowInstance.position = new Rect(Mathf.Max(rect.x, 50f), Mathf.Max(rect.y, 50f), rect.width, 200f + (showNewVersion ? 700f : 400f));
         }
 
         private static DateTime UtcDateTimeFromStr(string str)
@@ -114,84 +326,114 @@ namespace HTC.UnityPlugin.Vive
             return utcDateTime.Ticks.ToString();
         }
 
-        private static bool UrlSuccess(WWW www)
+        private static UnityWebRequest GetUnityWebRequestAndSend(string url)
         {
-            if (!string.IsNullOrEmpty(www.error))
-            {
-                // API rate limit exceeded, see https://developer.github.com/v3/#rate-limiting
-                Debug.Log("url:" + www.url);
-                Debug.Log("error:" + www.error);
-                Debug.Log(www.text);
-                return false;
-            }
-
-            if (Regex.IsMatch(www.text, "404 not found", RegexOptions.IgnoreCase))
-            {
-                Debug.Log("url:" + www.url);
-                Debug.Log("error:" + www.error);
-                Debug.Log(www.text);
-                return false;
-            }
-
-            return true;
+            var webReq = new UnityWebRequest(url);
+#if UNITY_5_4_OR_NEWER
+            webReq.SendWebRequest();
+#endif
+            return webReq;
         }
 
-        private static bool ShouldDisplayNewUpdate()
+        private static string GetWebText(UnityWebRequest wr)
         {
-            if (string.IsNullOrEmpty(latestRepoInfo.tag_name)) { return false; }
+#if UNITY_5_4_OR_NEWER
+            return wr.downloadHandler.text;
+#else
+            return wr.text;
+#endif
+        }
 
+        private static bool TryGetWebHeaderValue(UnityWebRequest wr, string headerKey, out string headerValue)
+        {
+#if UNITY_5_4_OR_NEWER
+            headerValue = wr.GetResponseHeader(headerKey);
+            return string.IsNullOrEmpty(headerValue);
+#else
+            if (wr.responseHeaders == null) { headerValue = string.Empty; return false; }
+            return wr.responseHeaders.TryGetValue(headerKey, out headerValue);
+#endif
+        }
+
+        private static bool UrlSuccess(UnityWebRequest wr)
+        {
             try
             {
-                latestVersion = new Version(Regex.Replace(latestRepoInfo.tag_name, "[^0-9\\.]", string.Empty));
+                if (!string.IsNullOrEmpty(wr.error))
+                {
+                    // API rate limit exceeded, see https://developer.github.com/v3/#rate-limiting
+                    Debug.Log("url:" + wr.url);
+                    Debug.Log("error:" + wr.error);
+                    Debug.Log(GetWebText(wr));
+
+                    string responseHeader;
+                    if (TryGetWebHeaderValue(wr, "X-RateLimit-Limit", out responseHeader))
+                    {
+                        Debug.Log("X-RateLimit-Limit:" + responseHeader);
+                    }
+                    if (TryGetWebHeaderValue(wr, "X-RateLimit-Remaining", out responseHeader))
+                    {
+                        Debug.Log("X-RateLimit-Remaining:" + responseHeader);
+                    }
+                    if (TryGetWebHeaderValue(wr, "X-RateLimit-Reset", out responseHeader))
+                    {
+                        Debug.Log("X-RateLimit-Reset:" + TimeZone.CurrentTimeZone.ToLocalTime(new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(double.Parse(responseHeader))).ToString());
+                    }
+                    VersionCheckLog("Failed. Rate limit exceeded");
+                    return false;
+                }
+
+                if (Regex.IsMatch(GetWebText(wr), "404 not found", RegexOptions.IgnoreCase))
+                {
+                    Debug.Log("url:" + wr.url);
+                    Debug.Log("error:" + wr.error);
+                    Debug.Log(GetWebText(wr));
+                    VersionCheckLog("Failed. 404 not found");
+                    return false;
+                }
             }
-            catch
+            catch (Exception e)
             {
-                latestVersion = default(Version);
+                Debug.LogWarning(e);
+                VersionCheckLog("Failed. " + e.ToString());
                 return false;
             }
-
-            if (latestVersion <= VIUVersion.current) { return false; }
-
-            if (EditorPrefs.HasKey(string.Format(doNotShowUpdateKey, latestVersion.ToString()))) { return false; }
 
             return true;
         }
 
-        private Vector2 scrollPosition;
-        private bool toggleDoNotShowState = false;
-        private bool toggleBindUISwithState = true;
-        private bool toggleExCamSwithState = true;
+        private string GetResourcePath()
+        {
+            var ms = MonoScript.FromScriptableObject(this);
+            var path = AssetDatabase.GetAssetPath(ms);
+            path = Path.GetDirectoryName(path);
+            return path.Substring(0, path.Length - "Scripts/Editor".Length) + "Textures/";
+        }
 
         public void OnGUI()
         {
-            if (showSwitchSetup)
+#if UNITY_2017_1_OR_NEWER
+            if (EditorApplication.isCompiling)
             {
-                if (toggleBindUISwithState)
-                {
-                    EditorGUILayout.HelpBox(s_enableBindUISwitchInfo, MessageType.Warning);
-                }
-                else
-                {
-                    EditorGUILayout.HelpBox(s_disableBindUISwitchInfo, MessageType.Warning);
-                }
-
-                toggleBindUISwithState = GUILayout.Toggle(toggleBindUISwithState, "Enable Binding Interface Switch");
-
-                if (toggleExCamSwithState)
-                {
-                    EditorGUILayout.HelpBox(s_enableExternalCamSwitcInfo, MessageType.Warning);
-                }
-                else
-                {
-                    EditorGUILayout.HelpBox(s_disableExternalCamSwitcInfo, MessageType.Warning);
-                }
-
-                toggleExCamSwithState = GUILayout.Toggle(toggleExCamSwithState, "Enable External Camera Switch");
+                EditorGUILayout.LabelField("Compiling...");
+                return;
+            }
+#endif
+            if (viuLogo == null)
+            {
+                var currentDir = Path.GetDirectoryName(AssetDatabase.GetAssetPath(MonoScript.FromScriptableObject(this)));
+                var texturePath = currentDir.Substring(0, currentDir.Length - "Scripts/Editor".Length) + "Textures/VIU_logo.png";
+                viuLogo = AssetDatabase.LoadAssetAtPath<Texture2D>(texturePath);
             }
 
-            if (showNewVersionInfo)
+            if (viuLogo != null)
             {
-                EditorGUILayout.HelpBox("A new version of the Vive Input Utility is available!", MessageType.Warning);
+                GUI.DrawTexture(GUILayoutUtility.GetRect(position.width, 124, GUI.skin.box), viuLogo, ScaleMode.ScaleToFit);
+            }
+
+            if (showNewVersion)
+            {
+                EditorGUILayout.HelpBox("New version available:", MessageType.Warning);
 
                 GUILayout.Label("Current version: " + VIUVersion.current);
                 GUILayout.Label("New version: " + latestVersion);
@@ -199,132 +441,109 @@ namespace HTC.UnityPlugin.Vive
                 if (!string.IsNullOrEmpty(latestRepoInfo.body))
                 {
                     GUILayout.Label("Release notes:");
-                    EditorGUILayout.HelpBox(latestRepoInfo.body, MessageType.Info);
+                    releaseNoteScrollPosition = GUILayout.BeginScrollView(releaseNoteScrollPosition, GUILayout.Height(250f));
+                    EditorGUILayout.HelpBox(latestRepoInfo.body, MessageType.None);
+                    GUILayout.EndScrollView();
                 }
 
-                if (GUILayout.Button("Get Latest Version"))
+                GUILayout.BeginHorizontal();
                 {
-                    Application.OpenURL(pluginUrl);
+                    if (GUILayout.Button(new GUIContent("Get Latest Version", "Goto " + pluginUrl)))
+                    {
+                        Application.OpenURL(pluginUrl);
+                    }
+
+                    GUILayout.FlexibleSpace();
+
+                    toggleSkipThisVersion = GUILayout.Toggle(toggleSkipThisVersion, "Do not prompt for this version again.");
+                }
+                GUILayout.EndHorizontal();
+            }
+
+            UpdateIgnoredNotifiedSettingsCount(true);
+
+            if (notifiedSettingsCount > 0)
+            {
+                GUILayout.EndScrollView();
+
+                if (ignoredSettingsCount > 0)
+                {
+                    if (GUILayout.Button("Clear All Ignores(" + ignoredSettingsCount + ")"))
+                    {
+                        foreach (var setting in s_settings) { setting.DeleteIgnore(); }
+                    }
                 }
 
-                EditorGUI.BeginChangeCheck();
-                var doNotShow = GUILayout.Toggle(toggleDoNotShowState, "Do not prompt for this version again.");
-                if (EditorGUI.EndChangeCheck())
+                GUILayout.BeginHorizontal();
                 {
-                    toggleDoNotShowState = doNotShow;
-                    var key = string.Format(doNotShowUpdateKey, latestVersion);
-                    if (doNotShow)
+                    if (GUILayout.Button("Accept All(" + notifiedSettingsCount + ")"))
                     {
-                        EditorPrefs.SetBool(key, true);
+                        for (int i = 10; i >= 0 && notifiedSettingsCount > 0; --i)
+                        {
+                            foreach (var setting in s_settings) { if (!setting.SkipCheck() && !setting.IsIgnored()) { setting.AcceptRecommendValue(); } }
+
+                            VIUSettingsEditor.ApplySDKChanges();
+
+                            UpdateIgnoredNotifiedSettingsCount(false);
+                        }
                     }
-                    else
+
+                    if (GUILayout.Button("Ignore All(" + notifiedSettingsCount + ")"))
                     {
-                        EditorPrefs.DeleteKey(key);
+                        foreach (var setting in s_settings) { if (!setting.SkipCheck() && !setting.IsIgnored() && !setting.IsUsingRecommendedValue()) { setting.DoIgnore(); } }
                     }
                 }
+                GUILayout.EndHorizontal();
+            }
+            else if (shouldNotifiedSettingsCount > 0)
+            {
+                EditorGUILayout.HelpBox("Some recommended settings ignored.", MessageType.Warning);
+
+                GUILayout.FlexibleSpace();
+
+                if (GUILayout.Button("Clear All Ignores(" + ignoredSettingsCount + ")"))
+                {
+                    foreach (var setting in s_settings) { setting.DeleteIgnore(); }
+                }
+            }
+            else
+            {
+                EditorGUILayout.HelpBox("All recommended settings applied.", MessageType.Info);
+
+                GUILayout.FlexibleSpace();
+            }
+
+            VIUSettingsEditor.ApplySDKChanges();
+
+            if (VIUProjectSettings.hasChanged)
+            {
+                // save ignore keys
+                VIUProjectSettings.Save();
+            }
+
+            if (GUILayout.Button("Close"))
+            {
+                Close();
             }
         }
 
         private void OnDestroy()
         {
-            if (showSwitchSetup)
+            if (viuLogo != null)
             {
-                EditorPrefs.SetBool(doNotShowSetupSwitch, true);
-
-                EditSymbols(
-                    new EditSymbolArg() { symbol = VIU_BINDING_INTERFACE_SWITCH_SYMBOL, enable = toggleBindUISwithState },
-                    new EditSymbolArg() { symbol = VIU_EXTERNAL_CAMERA_SWITCH_SYMBOL, enable = toggleExCamSwithState }
-                );
-            }
-        }
-
-        private struct EditSymbolArg
-        {
-            public string symbol;
-            public bool enable;
-        }
-
-        private static void EditSymbols(params EditSymbolArg[] args)
-        {
-            var symbolChanged = false;
-            var scriptingDefineSymbols = PlayerSettings.GetScriptingDefineSymbolsForGroup(BuildTargetGroup.Standalone);
-            var symbolsList = new List<string>(scriptingDefineSymbols.Split(';'));
-
-            foreach (var arg in args)
-            {
-                if (arg.enable)
-                {
-                    if (!symbolsList.Contains(arg.symbol))
-                    {
-                        symbolsList.Add(arg.symbol);
-                        symbolChanged = true;
-                    }
-                }
-                else
-                {
-                    if (symbolsList.RemoveAll(s => s == arg.symbol) > 0)
-                    {
-                        symbolChanged = true;
-                    }
-                }
+                viuLogo = null;
             }
 
-            if (symbolChanged)
+            if (showNewVersion && toggleSkipThisVersion && !string.IsNullOrEmpty(ignoreThisVersionKey))
             {
-                EditorApplication.delayCall += GetSetSymbolsCallback(string.Join(";", symbolsList.ToArray()));
+                showNewVersion = false;
+                VIUProjectSettings.AddIgnoreKey(ignoreThisVersionKey);
+                VIUProjectSettings.Save();
             }
-        }
 
-        private static EditorApplication.CallbackFunction GetSetSymbolsCallback(string symbols)
-        {
-            return () => PlayerSettings.SetScriptingDefineSymbolsForGroup(BuildTargetGroup.Standalone, symbols);
-        }
-
-        [PreferenceItem("Vive Input Utility")]
-        public static void OnVIUPreferenceGUI()
-        {
-            if (!s_waitingForCompile)
+            if (windowInstance == this)
             {
-                bool toggleValue;
-
-                EditorGUI.BeginChangeCheck();
-
-#if VIU_BINDING_INTERFACE_SWITCH
-                EditorGUILayout.HelpBox(s_enableBindUISwitchInfo, MessageType.Info);
-                toggleValue = EditorGUILayout.Toggle("Enable Binding Interface Switch", true);
-#else
-                EditorGUILayout.HelpBox(s_disableBindUISwitchInfo, MessageType.Info);
-                toggleValue = EditorGUILayout.Toggle("Enable Binding Interface Switch", false);
-#endif
-
-                if (EditorGUI.EndChangeCheck())
-                {
-                    s_waitingForCompile = true;
-                    EditSymbols(new EditSymbolArg() { symbol = VIU_BINDING_INTERFACE_SWITCH_SYMBOL, enable = toggleValue });
-                    return;
-                }
-
-                EditorGUI.BeginChangeCheck();
-
-#if VIU_EXTERNAL_CAMERA_SWITCH
-                EditorGUILayout.HelpBox(s_enableExternalCamSwitcInfo, MessageType.Info);
-                toggleValue = EditorGUILayout.Toggle("Enable External Camera Switch", true);
-#else
-                EditorGUILayout.HelpBox(s_disableExternalCamSwitcInfo, MessageType.Info);
-                toggleValue = EditorGUILayout.Toggle("Enable External Camera Switch", false);
-#endif
-
-                if (EditorGUI.EndChangeCheck())
-                {
-                    s_waitingForCompile = true;
-                    EditSymbols(new EditSymbolArg() { symbol = VIU_EXTERNAL_CAMERA_SWITCH_SYMBOL, enable = toggleValue });
-                    return;
-                }
-            }
-            else
-            {
-                GUILayout.Space(30f);
-                GUILayout.Button("Re-compiling...");
+                windowInstance = null;
             }
         }
     }

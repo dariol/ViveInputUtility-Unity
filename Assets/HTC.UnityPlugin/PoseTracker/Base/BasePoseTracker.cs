@@ -1,6 +1,7 @@
-﻿//========= Copyright 2016-2017, HTC Corporation. All rights reserved. ===========
+﻿//========= Copyright 2016-2019, HTC Corporation. All rights reserved. ===========
 
 using HTC.UnityPlugin.Utility;
+using System;
 using UnityEngine;
 
 namespace HTC.UnityPlugin.PoseTracker
@@ -23,11 +24,20 @@ namespace HTC.UnityPlugin.PoseTracker
             }
             else if (!modifierSet.Contains(obj))
             {
-                for (int i = modifierSet.Count - 1; i >= 0; --i)
+                // insert obj with right priority order
+                if (obj.priority > modifierSet[modifierSet.Count - 1].priority)
                 {
-                    if (modifierSet[i].priority <= obj.priority)
+                    modifierSet.Add(obj);
+                }
+                else
+                {
+                    for (int i = 0, imax = modifierSet.Count; i < imax; ++i)
                     {
-                        modifierSet.Insert(i + 1, obj);
+                        if (obj.priority <= modifierSet[i].priority)
+                        {
+                            modifierSet.Insert(i, obj);
+                            break;
+                        }
                     }
                 }
             }
@@ -38,14 +48,28 @@ namespace HTC.UnityPlugin.PoseTracker
             return modifierSet == null ? false : modifierSet.Remove(obj);
         }
 
+        [Obsolete]
         protected void TrackPose(Pose pose, Transform origin = null)
         {
-            pose = pose * new Pose(posOffset, Quaternion.Euler(rotOffset));
-            ModifyPose(ref pose, origin);
-            Pose.SetPose(transform, pose, origin);
+            TrackPose((RigidPose)pose, origin);
         }
 
+        protected void TrackPose(RigidPose pose, Transform origin = null)
+        {
+            pose = pose * new RigidPose(posOffset, Quaternion.Euler(rotOffset));
+            ModifyPose(ref pose, origin);
+            RigidPose.SetPose(transform, pose, origin);
+        }
+
+        [Obsolete]
         protected void ModifyPose(ref Pose pose, Transform origin)
+        {
+            var rigidPose = (RigidPose)pose;
+            ModifyPose(ref rigidPose, origin);
+            pose = rigidPose;
+        }
+
+        protected void ModifyPose(ref RigidPose pose, Transform origin)
         {
             if (modifierSet == null) { return; }
 

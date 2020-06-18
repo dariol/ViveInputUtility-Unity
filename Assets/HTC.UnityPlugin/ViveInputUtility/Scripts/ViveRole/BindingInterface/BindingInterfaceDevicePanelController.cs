@@ -1,5 +1,6 @@
-﻿//========= Copyright 2016-2017, HTC Corporation. All rights reserved. ===========
+﻿//========= Copyright 2016-2019, HTC Corporation. All rights reserved. ===========
 
+#pragma warning disable 0649
 using HTC.UnityPlugin.Utility;
 using HTC.UnityPlugin.VRModuleManagement;
 using System;
@@ -78,7 +79,7 @@ namespace HTC.UnityPlugin.Vive.BindingInterface
             m_inputDeviceSN.text = string.Empty;
             CheckInputDeviceSN(string.Empty);
 
-            for (uint deviceIndex = 0; deviceIndex < VRModule.MAX_DEVICE_COUNT; ++deviceIndex)
+            for (uint deviceIndex = 0, imax = VRModule.GetDeviceStateCount(); deviceIndex < imax; ++deviceIndex)
             {
                 if (VRModule.GetCurrentDeviceState(deviceIndex).isConnected)
                 {
@@ -153,7 +154,7 @@ namespace HTC.UnityPlugin.Vive.BindingInterface
                     boundRect.yMin = Mathf.Min(boundRect.yMin, m_itemCorners[0].y, m_itemCorners[1].y, m_itemCorners[2].y, m_itemCorners[3].y);
                     boundRect.yMax = Mathf.Max(boundRect.yMax, m_itemCorners[0].y, m_itemCorners[1].y, m_itemCorners[2].y, m_itemCorners[3].y);
                 }
-                
+
                 // calculate view panel's scale to let view rect includes all devices
                 var innerWidth = m_deviceViewMaskWidth - (m_deviceViewMargin * 2f);
                 var innerHeight = m_deviceViewMaskHeight - (m_deviceViewMargin * 2f);
@@ -307,9 +308,28 @@ namespace HTC.UnityPlugin.Vive.BindingInterface
             m_selectedRoleMap = roleMap;
         }
 
+        public void SetAnimatorSlideLeft()
+        {
+            if (m_animator.isInitialized)
+            {
+                m_animator.SetTrigger("SlideDeviceViewLeft");
+            }
+        }
+
+        public void SetAnimatorSlideRight()
+        {
+            if (m_animator.isInitialized)
+            {
+                m_animator.SetTrigger("SlideDeviceViewRight");
+            }
+        }
+
         public void SetAnimatorIsEditing(bool value)
         {
-            m_animator.SetBool("isEditing", value);
+            if (m_animator.isInitialized)
+            {
+                m_animator.SetBool("isEditing", value);
+            }
         }
     }
 }

@@ -2,7 +2,6 @@
 using HTC.UnityPlugin.Utility;
 using System.Collections.Generic;
 using UnityEngine;
-using Pose = HTC.UnityPlugin.PoseTracker.Pose;
 
 public class ResetButton : MonoBehaviour
     , IColliderEventPressUpHandler
@@ -16,9 +15,7 @@ public class ResetButton : MonoBehaviour
     [SerializeField]
     private ColliderButtonEventData.InputButton m_activeButton = ColliderButtonEventData.InputButton.Trigger;
 
-    private Pose[] resetPoses;
-
-    private Vector3 buttonOriginPosition;
+    private RigidPose[] resetPoses;
 
     private HashSet<ColliderButtonEventData> pressingEvents = new HashSet<ColliderButtonEventData>();
 
@@ -41,13 +38,11 @@ public class ResetButton : MonoBehaviour
 
     private void Start()
     {
-        resetPoses = new Pose[effectTargets.Length];
+        resetPoses = new RigidPose[effectTargets.Length];
         for (int i = 0; i < effectTargets.Length; ++i)
         {
-            resetPoses[i] = new Pose(effectTargets[i]);
+            resetPoses[i] = new RigidPose(effectTargets[i]);
         }
-
-        buttonOriginPosition = buttonObject.position;
     }
 #if UNITY_EDITOR
     protected virtual void OnValidate()
@@ -82,7 +77,7 @@ public class ResetButton : MonoBehaviour
     {
         if (eventData.button == m_activeButton && pressingEvents.Add(eventData) && pressingEvents.Count == 1)
         {
-            buttonObject.position = buttonOriginPosition + buttonDownDisplacement;
+            buttonObject.localPosition += buttonDownDisplacement;
         }
     }
 
@@ -90,7 +85,7 @@ public class ResetButton : MonoBehaviour
     {
         if (pressingEvents.Remove(eventData) && pressingEvents.Count == 0)
         {
-            buttonObject.position = buttonOriginPosition;
+            buttonObject.localPosition -= buttonDownDisplacement;
         }
     }
 }

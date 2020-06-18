@@ -1,5 +1,6 @@
-﻿//========= Copyright 2016-2017, HTC Corporation. All rights reserved. ===========
+﻿//========= Copyright 2016-2019, HTC Corporation. All rights reserved. ===========
 
+#pragma warning disable 0649
 using HTC.UnityPlugin.Utility;
 using HTC.UnityPlugin.VRModuleManagement;
 using System;
@@ -19,6 +20,8 @@ namespace HTC.UnityPlugin.Vive.BindingInterface
         [Serializable]
         public class UnityEventString : UnityEvent<string> { }
 
+        [SerializeField]
+        private Animator m_animator;
         [SerializeField]
         private BindingInterfaceRoleSetButtonItem m_roleSetButtonItem;
         [SerializeField]
@@ -45,9 +48,6 @@ namespace HTC.UnityPlugin.Vive.BindingInterface
 
         private void Awake()
         {
-            ViveRole.Initialize();
-            ViveRoleBindingsHelper.AutoLoadConfig();
-
             RefreshRoleSelection();
 
             // select the role that have largest binding count
@@ -61,8 +61,6 @@ namespace HTC.UnityPlugin.Vive.BindingInterface
             }
         }
 
-        public void Test(ViveRole.IMap roleMap, string deviceSN) { }
-
         private void OnEnable()
         {
             VRModule.onDeviceConnected += OnDeviceConnected;
@@ -71,11 +69,38 @@ namespace HTC.UnityPlugin.Vive.BindingInterface
         private void OnDisable()
         {
             VRModule.onDeviceConnected -= OnDeviceConnected;
+
+            FinishEditBinding();
         }
 
         private void OnDeviceConnected(uint deviceIndex, bool connected)
         {
             RefreshSelectedRoleBindings();
+            RefreshRoleSelection();
+        }
+
+        public void SetAnimatorSlideLeft()
+        {
+            if (m_animator.isInitialized)
+            {
+                m_animator.SetTrigger("SlideRoleSetViewLeft");
+            }
+        }
+
+        public void SetAnimatorSlideRight()
+        {
+            if (m_animator.isInitialized)
+            {
+                m_animator.SetTrigger("SlideRoleSetViewRight");
+            }
+        }
+
+        public void EnableSelection()
+        {
+            for (int i = 0, imax = m_roleSetButtonList.Count; i < imax; ++i)
+            {
+                m_roleSetButtonList[i].interactable = true;
+            }
         }
 
         public void DisableSelection()
@@ -83,14 +108,6 @@ namespace HTC.UnityPlugin.Vive.BindingInterface
             for (int i = 0, imax = m_roleSetButtonList.Count; i < imax; ++i)
             {
                 m_roleSetButtonList[i].interactable = false;
-            }
-        }
-
-        public void EableSelection()
-        {
-            for (int i = 0, imax = m_roleSetButtonList.Count; i < imax; ++i)
-            {
-                m_roleSetButtonList[i].interactable = true;
             }
         }
 
@@ -125,6 +142,7 @@ namespace HTC.UnityPlugin.Vive.BindingInterface
 
                 m_editingDevice = deviceSN;
                 RefreshSelectedRoleBindings();
+                RefreshRoleSelection();
             }
             else
             {
@@ -192,13 +210,14 @@ namespace HTC.UnityPlugin.Vive.BindingInterface
             }
 
             selectedRoleMap.UnbindDevice(deviceSN);
-
             RefreshRoleSelection();
             RefreshSelectedRoleBindings();
         }
 
         public void RefreshRoleSelection()
         {
+            ViveRole.Initialize();
+
             if (m_roleSetButtonList.Count == 0)
             {
                 m_roleSetButtonList.Add(m_roleSetButtonItem);

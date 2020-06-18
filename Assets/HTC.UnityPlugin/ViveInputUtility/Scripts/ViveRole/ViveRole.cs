@@ -1,4 +1,4 @@
-﻿//========= Copyright 2016-2017, HTC Corporation. All rights reserved. ===========
+﻿//========= Copyright 2016-2019, HTC Corporation. All rights reserved. ===========
 
 using HTC.UnityPlugin.VRModuleManagement;
 using System;
@@ -25,6 +25,20 @@ namespace HTC.UnityPlugin.Vive
         private static bool s_initialized = false;
 
         [RuntimeInitializeOnLoadMethod]
+        private static void OnLoad()
+        {
+            if (VRModule.Active && VRModule.activeModule != VRModuleActiveEnum.Uninitialized)
+            {
+                Initialize();
+            }
+            else
+            {
+                VRModule.onActiveModuleChanged += OnModuleActive;
+            }
+        }
+
+        private static void OnModuleActive(VRModuleActiveEnum activatedModule) { Initialize(); }
+        
         public static void Initialize()
         {
             if (s_initialized || !Application.isPlaying) { return; }

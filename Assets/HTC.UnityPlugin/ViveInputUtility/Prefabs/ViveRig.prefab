@@ -1192,7 +1192,7 @@ GameObject:
   m_Component:
   - 4: {fileID: 431768}
   - 20: {fileID: 2029416}
-  - 114: {fileID: 11436036}
+  - 114: {fileID: 11470140}
   m_Layer: 0
   m_Name: Camera
   m_TagString: MainCamera
@@ -2578,7 +2578,7 @@ MeshRenderer:
   m_CastShadows: 0
   m_ReceiveShadows: 0
   m_Materials:
-  - {fileID: 2100000, guid: 3320905fb6f6bd54297f26399d87c525, type: 2}
+  - {fileID: 2100000, guid: 50143b523bb80ca4696e4d922443e44f, type: 2}
   m_SubsetIndices: 
   m_StaticBatchRoot: {fileID: 0}
   m_UseLightProbes: 1
@@ -2630,7 +2630,7 @@ MeshRenderer:
   m_CastShadows: 0
   m_ReceiveShadows: 0
   m_Materials:
-  - {fileID: 2100000, guid: 3320905fb6f6bd54297f26399d87c525, type: 2}
+  - {fileID: 2100000, guid: 50143b523bb80ca4696e4d922443e44f, type: 2}
   m_SubsetIndices: 
   m_StaticBatchRoot: {fileID: 0}
   m_UseLightProbes: 1
@@ -3219,17 +3219,6 @@ MonoBehaviour:
   segmentLength: 0.05
   raycaster: {fileID: 11483628}
   lineRenderer: {fileID: 12010886}
---- !u!114 &11436036
-MonoBehaviour:
-  m_ObjectHideFlags: 1
-  m_PrefabParentObject: {fileID: 0}
-  m_PrefabInternal: {fileID: 100100000}
-  m_GameObject: {fileID: 197116}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: bcf697fb9de885d47b4c990c8a58936a, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
 --- !u!114 &11440968
 MonoBehaviour:
   m_ObjectHideFlags: 1
@@ -3389,6 +3378,10 @@ MonoBehaviour:
   showOnHitOnly: 1
   hitTarget: {fileID: 0}
   hitDistance: 0
+  defaultReticleMaterial: {fileID: 2100000, guid: 50143b523bb80ca4696e4d922443e44f,
+    type: 2}
+  reticleRenderer:
+  - {fileID: 2367626}
 --- !u!114 &11452568
 MonoBehaviour:
   m_ObjectHideFlags: 1
@@ -3616,6 +3609,17 @@ MonoBehaviour:
     m_roleTypeFullName: HTC.UnityPlugin.Vive.TrackerRole
     m_roleValueName: Tracker1
     m_roleValueInt: 0
+--- !u!114 &11470140
+MonoBehaviour:
+  m_ObjectHideFlags: 1
+  m_PrefabParentObject: {fileID: 0}
+  m_PrefabInternal: {fileID: 100100000}
+  m_GameObject: {fileID: 197116}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 326f9add24fafee418bdcd053a0324a0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!114 &11470256
 MonoBehaviour:
   m_ObjectHideFlags: 1
@@ -3739,6 +3743,8 @@ MonoBehaviour:
   showOnHitOnly: 1
   hitTarget: {fileID: 0}
   hitDistance: 0
+  defaultReticleMaterial: {fileID: 0}
+  reticleRenderer: []
 --- !u!114 &11480700
 MonoBehaviour:
   m_ObjectHideFlags: 1
@@ -3991,6 +3997,8 @@ MonoBehaviour:
   showOnHitOnly: 1
   hitTarget: {fileID: 0}
   hitDistance: 0
+  defaultReticleMaterial: {fileID: 0}
+  reticleRenderer: []
 --- !u!114 &11494136
 MonoBehaviour:
   m_ObjectHideFlags: 1
@@ -4040,6 +4048,10 @@ MonoBehaviour:
   showOnHitOnly: 1
   hitTarget: {fileID: 0}
   hitDistance: 0
+  defaultReticleMaterial: {fileID: 2100000, guid: 50143b523bb80ca4696e4d922443e44f,
+    type: 2}
+  reticleRenderer:
+  - {fileID: 2394866}
 --- !u!114 &11496784
 MonoBehaviour:
   m_ObjectHideFlags: 1

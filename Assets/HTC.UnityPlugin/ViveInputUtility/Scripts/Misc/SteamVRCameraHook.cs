@@ -1,47 +1,24 @@
-﻿//========= Copyright 2016-2017, HTC Corporation. All rights reserved. ===========
+﻿//========= Copyright 2016-2019, HTC Corporation. All rights reserved. ===========
 
-using HTC.UnityPlugin.VRModuleManagement;
 using UnityEngine;
 
-public class SteamVRCameraHook : MonoBehaviour
+namespace HTC.UnityPlugin.Vive
 {
-#if VIU_STEAMVR
-    private void Awake()
+    [ExecuteInEditMode]
+    public class SteamVRCameraHook : MonoBehaviour
     {
-        if (VRModule.activeModule == VRModuleActiveEnum.Uninitialized)
+        private void Awake()
         {
-            VRModule.onActiveModuleChanged += OnModuleActivated;
-        }
-        else
-        {
-            OnModuleActivated(VRModule.activeModule);
+            Debug.LogWarning("SteamVRCameraHook is deprecated. Switch to VRCameraHook automatically.");
+            gameObject.AddComponent<VRCameraHook>();
+            if (Application.isPlaying)
+            {
+                Destroy(this);
+            }
+            else
+            {
+                DestroyImmediate(this);
+            }
         }
     }
-
-    private void OnModuleActivated(VRModuleActiveEnum activatedModule)
-    {
-        if (activatedModule == VRModuleActiveEnum.SteamVR)
-        {
-            var earsComp = default(SteamVR_Ears);
-            for (int i = transform.childCount - 1; i >= 0; --i)
-            {
-                earsComp = transform.GetChild(i).GetComponentInChildren<SteamVR_Ears>();
-                if (earsComp != null) { break; }
-            }
-
-            if (earsComp == null)
-            {
-                var ears = new GameObject("Camera (ears)", typeof(AudioListener), typeof(SteamVR_Ears));
-                ears.transform.SetParent(transform, false);
-            }
-
-            if (GetComponent<SteamVR_Camera>() == null)
-            {
-                gameObject.AddComponent<SteamVR_Camera>();
-            }
-
-            VRModule.onActiveModuleChanged -= OnModuleActivated;
-        }
-    }
-#endif
 }

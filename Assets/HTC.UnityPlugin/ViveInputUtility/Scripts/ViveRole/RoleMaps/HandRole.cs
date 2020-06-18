@@ -1,10 +1,10 @@
-﻿//========= Copyright 2016-2017, HTC Corporation. All rights reserved. ===========
+﻿//========= Copyright 2016-2019, HTC Corporation. All rights reserved. ===========
 
+using HTC.UnityPlugin.Utility;
 using HTC.UnityPlugin.VRModuleManagement;
 using System;
 using System.Collections.Generic;
 using UnityEngine;
-using Pose = HTC.UnityPlugin.PoseTracker.Pose;
 
 namespace HTC.UnityPlugin.Vive
 {
@@ -94,7 +94,7 @@ namespace HTC.UnityPlugin.Vive
 
         public override void OnConnectedDeviceChanged(uint deviceIndex, VRModuleDeviceClass deviceClass, string deviceSN, bool connected)
         {
-            if (!RoleMap.IsDeviceBound(deviceSN) && !IsController(deviceClass)) { return; }
+            if (!RoleMap.IsDeviceBound(deviceSN) && !IsController(deviceClass) && !IsTracker(deviceClass)) { return; }
 
             Refresh();
         }
@@ -146,12 +146,12 @@ namespace HTC.UnityPlugin.Vive
             {
                 leftIndex = VRModule.INVALID_DEVICE_INDEX;
             }
-            
+
             // if not both left/right controllers are assigned, find and assign them with left/right most controller
             if (!VRModule.IsValidDeviceIndex(rightIndex) || !VRModule.IsValidDeviceIndex(leftIndex))
             {
                 // find right to left sorted controllers
-                // FIXME: GetSortedTrackedDeviceIndicesOfClass doesn't return correct devices count rightafter device connected
+                // FIXME: GetSortedTrackedDeviceIndicesOfClass doesn't return correct devices count right after device connected
 #if __VIU_STEAMVR
                 if (VRModule.activeModule == SupportedVRModule.SteamVR)
                 {
@@ -174,7 +174,7 @@ namespace HTC.UnityPlugin.Vive
                 else
 #endif
                 {
-                    for (uint deviceIndex = 1u; deviceIndex < VRModule.MAX_DEVICE_COUNT; ++deviceIndex)
+                    for (uint deviceIndex = 1u, imax = VRModule.GetDeviceStateCount(); deviceIndex < imax; ++deviceIndex)
                     {
                         if (IsController(deviceIndex) && deviceIndex != rightIndex && deviceIndex != leftIndex && !RoleMap.IsDeviceConnectedAndBound(deviceIndex))
                         {
@@ -252,7 +252,7 @@ namespace HTC.UnityPlugin.Vive
         }
 
         private static readonly float[] s_deviceDirPoint = new float[VRModule.MAX_DEVICE_COUNT];
-        public static void SortDeviceIndicesByDirection(List<uint> deviceList, Pose sortingReference)
+        public static void SortDeviceIndicesByDirection(List<uint> deviceList, RigidPose sortingReference)
         {
             if (deviceList == null || deviceList.Count == 0) { return; }
 
@@ -274,6 +274,12 @@ namespace HTC.UnityPlugin.Vive
             }
 
             deviceList.Sort(CompareDirection);
+        }
+
+        [Obsolete]
+        public static void SortDeviceIndicesByDirection(List<uint> deviceList, PoseTracker.Pose sortingReference)
+        {
+            SortDeviceIndicesByDirection(deviceList, sortingReference);
         }
 
         private static int CompareDirection(uint d1, uint d2)
